@@ -1,0 +1,276 @@
+networks:
+  internal:
+    driver: bridge
+
+services:
+  # === PostgreSQL Services ===
+  postgres-auth:
+    image: postgres:14
+    container_name: postgres-auth
+    environment:
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: auth_service
+    volumes:
+      - ./postgres/auth-data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U root -d auth_service"]
+      interval: 5s
+      timeout: 5s
+      retries: 50
+
+  postgres-stat:
+    image: postgres:14
+    container_name: postgres-stat
+    environment:
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: stat_service
+    volumes:
+      - ./postgres/stat-data:/var/lib/postgresql/data
+    ports:
+      - "5434:5432"
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U root -d stat_service"]
+      interval: 5s
+      timeout: 5s
+      retries: 50
+
+  postgres-task:
+    image: postgres:14
+    container_name: postgres-task
+    environment:
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: task_service
+    volumes:
+      - ./postgres/task-data:/var/lib/postgresql/data
+    ports:
+      - "5435:5432"
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U root -d task_service"]
+      interval: 5s
+      timeout: 5s
+      retries: 50
+
+  # === Kafka ===
+  kafka:
+    image: bitnami/kafka:latest
+    container_name: kafka
+    environment:
+      KAFKA_CFG_PROCESS_ROLES: broker,controller
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      KAFKA_CFG_NODE_ID: "1"
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+    ports:
+      - "9092:9092"
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "kafka-topics.sh", "--list", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 30s
+      retries: 15
+
+  kafka-init:
+    image: bitnami/kafka:latest
+    container_name: kafka-init
+    networks:
+      - internal
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint:
+      - sh
+      - -c
+      - |
+        echo "Creating topics..."
+        kafka-topics.sh --create --topic user-created --partitions 1 --replication-factor 1 --if-not-exists --bootstrap-server kafka:9092
+        kafka-topics.sh --create --topic stat --partitions 1 --replication-factor 1 --if-not-exists --bootstrap-server kafka:9092
+        echo "Topics created."
+
+  # === Auth Service ===
+  migrate-auth:
+    build:
+      context: ./auth_service_laravel
+    container_name: migrate-auth
+    networks:
+      - internal
+    depends_on:
+      postgres-auth:
+        condition: service_healthy
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -e
+        echo "Running migrations for Auth Service..."
+        php artisan migrate --force
+        echo "Auth Service migrations completed."
+
+  auth-service:
+    build:
+      context: ./auth_service_laravel
+    container_name: auth-service
+    networks:
+      - internal
+    ports:
+      - "8001:8000"
+    depends_on:
+      postgres-auth:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      migrate-auth:
+        condition: service_completed_successfully
+    command: php artisan serve --host=0.0.0.0 --port=8000
+
+  auth-worker:
+    build:
+      context: ./auth_service_laravel
+    container_name: auth-worker
+    networks:
+      - internal
+    depends_on:
+      postgres-auth:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    command: php artisan queue:work --tries=3 --timeout=60
+
+  # === Task Service ===
+  migrate-task:
+    build:
+      context: ./task_service_laravel
+    container_name: migrate-task
+    networks:
+      - internal
+    depends_on:
+      postgres-task:
+        condition: service_healthy
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -e
+        echo "Running migrations for Task Service..."
+        php artisan migrate --force
+        echo "Task Service migrations completed."
+
+  task-service:
+    build:
+      context: ./task_service_laravel
+    container_name: task-service
+    networks:
+      - internal
+    ports:
+      - "8003:8000"
+    depends_on:
+      postgres-task:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      migrate-task:
+        condition: service_completed_successfully
+    command: php artisan serve --host=0.0.0.0 --port=8000
+
+  task-worker:
+    build:
+      context: ./task_service_laravel
+    container_name: task-worker
+    networks:
+      - internal
+    depends_on:
+      postgres-task:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    command: php artisan queue:work --tries=3 --timeout=60
+
+  task-kafka-consumer:
+    build:
+      context: ./task_service_laravel
+    container_name: task-kafka-consumer
+    networks:
+      - internal
+    depends_on:
+      postgres-task:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    command: php artisan kafka:consume
+
+  # === Stat Service ===
+  migrate-stat:
+    build:
+      context: ./stat_service_laravel
+    container_name: migrate-stat
+    networks:
+      - internal
+    depends_on:
+      postgres-stat:
+        condition: service_healthy
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -e
+        echo "Running migrations for Stat Service..."
+        php artisan migrate --force
+        echo "Stat Service migrations completed."
+
+  stat-service:
+    build:
+      context: ./stat_service_laravel
+    container_name: stat-service
+    networks:
+      - internal
+    ports:
+      - "8002:8000"
+    depends_on:
+      postgres-stat:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      migrate-stat:
+        condition: service_completed_successfully
+    command: php artisan serve --host=0.0.0.0 --port=8000
+
+  stat-kafka-consumer:
+    build:
+      context: ./stat_service_laravel
+    container_name: stat-kafka-consumer
+    networks:
+      - internal
+    depends_on:
+      postgres-stat:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    command: php artisan kafka:consume
