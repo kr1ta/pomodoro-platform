@@ -1,3 +1,5 @@
+version: '3.8'
+
 networks:
   internal:
     driver: bridge
@@ -19,9 +21,9 @@ services:
       - internal
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U root -d auth_service"]
-      interval: 5s
+      interval: 10s
       timeout: 5s
-      retries: 50
+      retries: 30
 
   postgres-stat:
     image: postgres:14
@@ -38,9 +40,9 @@ services:
       - internal
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U root -d stat_service"]
-      interval: 5s
+      interval: 10s
       timeout: 5s
-      retries: 50
+      retries: 30
 
   postgres-task:
     image: postgres:14
@@ -57,49 +59,63 @@ services:
       - internal
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U root -d task_service"]
-      interval: 5s
+      interval: 10s
       timeout: 5s
-      retries: 50
+      retries: 30
 
-  # === Kafka ===
-  kafka:
-    image: bitnami/kafka:latest
-    container_name: kafka
+  # === ZooKeeper ===
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.0.1
+    container_name: zookeeper
     environment:
-      KAFKA_CFG_PROCESS_ROLES: broker,controller
-      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
-      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
-      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
-      KAFKA_CFG_NODE_ID: "1"
-      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
-      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - internal
+
+  # === Apache Kafka ===
+  kafka:
+    image: confluentinc/cp-kafka:7.0.1
+    container_name: kafka
+    depends_on:
+      - zookeeper
     ports:
       - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 1
     networks:
       - internal
     healthcheck:
-      test: ["CMD", "kafka-topics.sh", "--list", "--bootstrap-server", "localhost:9092"]
+      test: ["CMD", "cat", "/proc/cpuinfo"]
       interval: 10s
-      timeout: 30s
-      retries: 15
+      timeout: 10s
+      retries: 30
 
-  kafka-init:
-    image: bitnami/kafka:latest
-    container_name: kafka-init
+  # === Kafka Topics Checker ===
+  kafka-topics-check:
+    image: confluentinc/cp-kafka:7.0.1
+    container_name: kafka-topics-check
     networks:
       - internal
     depends_on:
       kafka:
         condition: service_healthy
+    volumes:
+      - ./kafka/check_topics.sh:/check_topics.sh
     entrypoint:
       - sh
       - -c
       - |
-        echo "Creating topics..."
-        kafka-topics.sh --create --topic user-created --partitions 1 --replication-factor 1 --if-not-exists --bootstrap-server kafka:9092
-        kafka-topics.sh --create --topic stat --partitions 1 --replication-factor 1 --if-not-exists --bootstrap-server kafka:9092
-        echo "Topics created."
+        chmod +x /check_topics.sh
+        /check_topics.sh
+    restart: on-failure
 
   # === Auth Service ===
   migrate-auth:
@@ -117,6 +133,7 @@ services:
       - |
         set -e
         echo "Running migrations for Auth Service..."
+        sleep 5
         php artisan migrate --force
         echo "Auth Service migrations completed."
 
@@ -131,10 +148,6 @@ services:
     depends_on:
       postgres-auth:
         condition: service_healthy
-      kafka:
-        condition: service_healthy
-      kafka-init:
-        condition: service_completed_successfully
       migrate-auth:
         condition: service_completed_successfully
     command: php artisan serve --host=0.0.0.0 --port=8000
@@ -148,10 +161,6 @@ services:
     depends_on:
       postgres-auth:
         condition: service_healthy
-      kafka:
-        condition: service_healthy
-      kafka-init:
-        condition: service_completed_successfully
     command: php artisan queue:work --tries=3 --timeout=60
 
   # === Task Service ===
@@ -170,6 +179,7 @@ services:
       - |
         set -e
         echo "Running migrations for Task Service..."
+        sleep 5
         php artisan migrate --force
         echo "Task Service migrations completed."
 
@@ -184,10 +194,6 @@ services:
     depends_on:
       postgres-task:
         condition: service_healthy
-      kafka:
-        condition: service_healthy
-      kafka-init:
-        condition: service_completed_successfully
       migrate-task:
         condition: service_completed_successfully
     command: php artisan serve --host=0.0.0.0 --port=8000
@@ -201,10 +207,6 @@ services:
     depends_on:
       postgres-task:
         condition: service_healthy
-      kafka:
-        condition: service_healthy
-      kafka-init:
-        condition: service_completed_successfully
     command: php artisan queue:work --tries=3 --timeout=60
 
   task-kafka-consumer:
@@ -216,9 +218,7 @@ services:
     depends_on:
       postgres-task:
         condition: service_healthy
-      kafka:
-        condition: service_healthy
-      kafka-init:
+      kafka-topics-check:
         condition: service_completed_successfully
     command: php artisan kafka:consume
 
@@ -238,6 +238,7 @@ services:
       - |
         set -e
         echo "Running migrations for Stat Service..."
+        sleep 5
         php artisan migrate --force
         echo "Stat Service migrations completed."
 
@@ -252,10 +253,6 @@ services:
     depends_on:
       postgres-stat:
         condition: service_healthy
-      kafka:
-        condition: service_healthy
-      kafka-init:
-        condition: service_completed_successfully
       migrate-stat:
         condition: service_completed_successfully
     command: php artisan serve --host=0.0.0.0 --port=8000
@@ -269,8 +266,6 @@ services:
     depends_on:
       postgres-stat:
         condition: service_healthy
-      kafka:
-        condition: service_healthy
-      kafka-init:
+      kafka-topics-check:
         condition: service_completed_successfully
     command: php artisan kafka:consume
