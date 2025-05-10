@@ -72,7 +72,8 @@ git clone https://github.com/kr1ta/stat_service_laravel.git stat_service_laravel
 2. Клонируйте файл `docker-compose.yml` в ту же папку
 3. Запустите:
 ```bash
-docker-compose up --build
+docker-compose build
+docker-compose up
 ```    
 
 ---
