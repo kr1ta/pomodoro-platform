@@ -61,15 +61,15 @@ Pomodoro Platform — это инструмент для управления в
 
 ---
 #### 🔧 Шаги для запуска:
+1. Клонируйте текущий репозиторий, необходимые файлы и папки: `docker-compose.yml`, `kafka`
 
-1. Клонируйте репозитории с сервисами:
+2. В только что клонированную папку клонируйте репозитории с сервисами:
 ```bash
 git clone https://github.com/kr1ta/auth_service_laravel.git auth_service_laravel
 git clone https://github.com/kr1ta/task_service_laravel.git task_service_laravel
 git clone https://github.com/kr1ta/stat_service_laravel.git stat_service_laravel
 ```
 
-2. Клонируйте файл `docker-compose.yml` в ту же папку
 3. Запустите:
 ```bash
 docker-compose build
