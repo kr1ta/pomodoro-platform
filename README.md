@@ -61,10 +61,21 @@ Pomodoro Platform — это инструмент для управления в
 
 ---
 #### 🔧 Шаги для запуска:
+
+0. На всякий случай установить:
+```bash
+git config --global core.autocrlf input
+```
+
 1. Клонируйте текущий репозиторий, необходимые файлы и папки: `docker-compose.yml`, `kafka`
+```bash
+git clone https://github.com/kr1ta/pomodoro-platform.git pomodoro-platform 
+```
 
 2. В только что клонированную папку клонируйте репозитории с сервисами:
 ```bash
+cd pomodoro-platform 
+
 git clone https://github.com/kr1ta/auth_service_laravel.git auth_service_laravel
 git clone https://github.com/kr1ta/task_service_laravel.git task_service_laravel
 git clone https://github.com/kr1ta/stat_service_laravel.git stat_service_laravel
