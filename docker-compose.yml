@@ -1,3 +1,9 @@
+x-laravel-environment: &laravel-env
+  DB_USERNAME: root
+  DB_PASSWORD: secret
+  KAFKA_BROKER: kafka:9092
+  VALIDATE_TOKEN_URL: http://auth-service:8000/api/validate-token
+
 networks:
   internal:
     driver: bridge
@@ -93,10 +99,10 @@ services:
     networks:
       - internal
     healthcheck:
-      test: ["CMD", "cat", "/proc/cpuinfo"]
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list > /dev/null 2>&1"]
       interval: 10s
       timeout: 10s
-      retries: 30
+      retries: 10
 
   # === Kafka Topics Checker ===
   kafka-topics-check:
@@ -124,6 +130,9 @@ services:
     depends_on:
       postgres-auth:
         condition: service_healthy
+    environment:
+      <<: *laravel-env
+      DB_HOST: postgres-auth
     entrypoint:
       - sh
       - -c
@@ -147,6 +156,9 @@ services:
         condition: service_healthy
       migrate-auth:
         condition: service_completed_successfully
+    environment:
+      <<: *laravel-env
+      DB_HOST: postgres-auth
     command: php artisan serve --host=0.0.0.0 --port=8000
 
   auth-worker:
@@ -158,6 +170,9 @@ services:
     depends_on:
       postgres-auth:
         condition: service_healthy
+    environment:
+      <<: *laravel-env
+      DB_HOST: postgres-auth
     command: php artisan queue:work --tries=3 --timeout=60
 
   # === Task Service ===
@@ -170,6 +185,9 @@ services:
     depends_on:
       postgres-task:
         condition: service_healthy
+    environment:
+      <<: *laravel-env
+      DB_HOST: postgres-task
     entrypoint:
       - sh
       - -c
@@ -193,6 +211,9 @@ services:
         condition: service_healthy
       migrate-task:
         condition: service_completed_successfully
+    environment:
+      <<: *laravel-env
+      DB_HOST: postgres-task
     command: php artisan serve --host=0.0.0.0 --port=8000
 
   task-worker:
@@ -204,6 +225,9 @@ services:
     depends_on:
       postgres-task:
         condition: service_healthy
+    environment:
+      <<: *laravel-env
+      DB_HOST: postgres-task
     command: php artisan queue:work --tries=3 --timeout=60
 
   task-kafka-consumer:
@@ -217,6 +241,9 @@ services:
         condition: service_healthy
       kafka-topics-check:
         condition: service_completed_successfully
+    environment:
+      <<: *laravel-env
+      DB_HOST: postgres-task
     command: php artisan kafka:consume
 
   # === Stat Service ===
@@ -229,6 +256,9 @@ services:
     depends_on:
       postgres-stat:
         condition: service_healthy
+    environment:
+      <<: *laravel-env
+      DB_HOST: postgres-stat
     entrypoint:
       - sh
       - -c
@@ -252,6 +282,9 @@ services:
         condition: service_healthy
       migrate-stat:
         condition: service_completed_successfully
+    environment:
+      <<: *laravel-env
+      DB_HOST: postgres-stat
     command: php artisan serve --host=0.0.0.0 --port=8000
 
   stat-kafka-consumer:
@@ -265,4 +298,7 @@ services:
         condition: service_healthy
       kafka-topics-check:
         condition: service_completed_successfully
+    environment:
+      <<: *laravel-env
+      DB_HOST: postgres-stat
     command: php artisan kafka:consume
