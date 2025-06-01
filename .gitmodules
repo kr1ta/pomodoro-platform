@@ -1,11 +1,11 @@
-[submodule "Auth Service"]
+[submodule "Auth"]
 	path = Auth
 	url = https://github.com/kr1ta/auth_service_laravel
 
-[submodule "Task & Habit Service"]
-	path = Task & Habit
+[submodule "TaskHabit"]
+	path = TaskHabit
 	url = https://github.com/kr1ta/task_service_laravel
 
-[submodule "Statistics Service"]
+[submodule "Statistics"]
 	path = Statistics
 	url = https://github.com/kr1ta/stat_service_laravel
